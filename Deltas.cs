@@ -10,12 +10,14 @@ using System.Threading.Tasks;
 
 namespace Edge_detection
 {
+    //Could have put this all in Blur.cs but wanted to make sure to seperate the methods
+    //Even though the code is exactly the same appart from nomenclature
     internal class Deltas
     {
-        internal static Bitmap DeltaFilter(Bitmap image, double[,] filterMatrix)
+        private static Bitmap DeltaFilter(Bitmap image, double[,] filterMatrix)
         {
             BitmapData imageData = image.LockBits(new Rectangle(0, 0, image.Width, image.Height), ImageLockMode.ReadOnly,
-            PixelFormat.Format32bppArgb);
+                PixelFormat.Format32bppArgb);
 
             Bitmap deltaImage = new(image.Width, image.Height);
             BitmapData deltaData = deltaImage.LockBits(new Rectangle(0, 0, deltaImage.Width, deltaImage.Height),

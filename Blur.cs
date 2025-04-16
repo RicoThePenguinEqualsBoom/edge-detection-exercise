@@ -28,53 +28,91 @@ namespace Edge_detection
             Marshal.Copy(imageData.Scan0, pixelBuffer, 0, bytes);
             image.UnlockBits(imageData);
 
+            //Define the width of the filter to be used
             int filterWidth = filterMatrix.GetLength(1);
 
+            //Define any relevant offsets and reused/unsafe variables
             int filterOffset = (filterWidth - 1) / 2;
-            int calcOffset;
-            int byteOffset;
             int imageStride = imageData.Stride;
+            int imageHeight = image.Height;
+            int imageWidth = image.Width;
 
-            double blue;
-            double green;
-            double red;
-
-            for (int offsetY = filterOffset; offsetY < image.Height - filterOffset; offsetY++)
+            //Define the size of processing chunks to avoid overlap and checkerboard patterns 
+            int processorCount = Environment.ProcessorCount;
+            int chunkSizeY = (imageHeight + processorCount - 1) / processorCount;
+            int chunkSizeX = (imageWidth + processorCount - 1) / processorCount;
+            var parallelOptions = new ParallelOptions
             {
-                for (int offsetX = filterOffset; offsetX < image.Width - filterOffset; offsetX++)
+                MaxDegreeOfParallelism = processorCount
+            };
+
+            List<Tuple<int, int>> chunkRangesY = [];
+            List<Tuple<int, int>> chunkRangesX = [];
+
+            //Define where the chunks start and end 
+            for (int i = 0; i < processorCount; i++)
+            {
+                int startY = Math.Max(i * chunkSizeY, filterOffset);
+                int limitY = Math.Min(startY + chunkSizeY, imageHeight);
+                int endY = Math.Min(limitY, imageHeight - filterOffset);
+                chunkRangesY.Add(new Tuple<int, int>(startY, endY));
+
+                int startX = Math.Max(i * chunkSizeX, filterOffset);
+                int limitX = Math.Min(startX + chunkSizeX, imageWidth);
+                int endX = Math.Min(limitX, imageWidth - filterOffset);
+                chunkRangesX.Add(new Tuple<int, int>(startX, endX));
+            }
+
+            Parallel.For(0, processorCount, parallelOptions, chunkY =>
+            {
+                //Embed the start and end of the chunks into the Parallel.For
+                var (startY, endY) = chunkRangesY[chunkY];
+
+                Parallel.For(0, processorCount, parallelOptions, chunkX =>
                 {
-                    blue = 0;
-                    green = 0;
-                    red = 0;
+                    var (startX, endX) = chunkRangesX[chunkX];
 
-                    byteOffset = offsetY * imageStride + offsetX * 4;
-
-                    for (int filterY = -filterOffset; filterY <= filterOffset; filterY++)
+                    for (int offsetY = startY; offsetY < endY; offsetY++)
                     {
-                        for (int filterX = -filterOffset; filterX <= filterOffset; filterX++)
+                        for (int offsetX = startX; offsetX < endX; offsetX++)
                         {
-                            calcOffset = byteOffset + (filterX * 4) + (filterY * imageStride);
+                            double blue = 0;
+                            double green = 0;
+                            double red = 0;
 
-                            blue += pixelBuffer[calcOffset] * filterMatrix[filterY + filterOffset, filterX + filterOffset];
-                            green += pixelBuffer[calcOffset + 1] * filterMatrix[filterY + filterOffset, filterX + filterOffset];
-                            red += pixelBuffer[calcOffset + 2] * filterMatrix[filterY + filterOffset, filterX + filterOffset];
+                            //Define the offset to be able to affect pixel per pixel
+                            //Instead of blue, green, red, alpha and only then next pixel
+                            int byteOffset = offsetY * imageStride + offsetX * 4;
+
+                            for (int filterY = -filterOffset; filterY <= filterOffset; filterY++)
+                            {
+                                for (int filterX = -filterOffset; filterX <= filterOffset; filterX++)
+                                {
+                                    int calcOffset = byteOffset + (filterX * 4) + (filterY * imageStride);
+
+                                    //Make sure to actually use the filter or it'll just spit out the same image you put in
+                                    red += pixelBuffer[calcOffset + 2] * filterMatrix[filterY + filterOffset, filterX + filterOffset];
+
+                                    green += pixelBuffer[calcOffset + 1] * filterMatrix[filterY + filterOffset, filterX + filterOffset];
+
+                                    blue += pixelBuffer[calcOffset] * filterMatrix[filterY + filterOffset, filterX + filterOffset];
+                                }
+                            }
+
+                            //Make sure the color value is within the appropriate values
+                            blue = Math.Clamp(blue, 0, 255);
+                            green = Math.Clamp(green, 0, 255);
+                            red = Math.Clamp(red, 0, 255);
+
+                            resultBuffer[byteOffset] = (byte)blue;
+                            resultBuffer[byteOffset + 1] = (byte)green;
+                            resultBuffer[byteOffset + 2] = (byte)red;
+                            resultBuffer[byteOffset + 3] = 255;
+
                         }
                     }
-
-                    blue = factor * blue;
-                    green = factor * green;
-                    red = factor * red;
-
-                    blue = Math.Clamp(blue, 0, 255);
-                    green = Math.Clamp(green, 0, 255);
-                    red = Math.Clamp(red, 0, 255);
-
-                    resultBuffer[byteOffset] = (byte)blue;
-                    resultBuffer[byteOffset + 1] = (byte)green;
-                    resultBuffer[byteOffset + 2] = (byte)red;
-                    resultBuffer[byteOffset + 3] = 255;
-                }
-            }
+                });
+            });
 
             Marshal.Copy(resultBuffer, 0, resultData.Scan0, bytes);
             blurredImage.UnlockBits(resultData);
@@ -109,6 +147,7 @@ namespace Edge_detection
             List<int> neighbourPixels = [];
             byte[] middlePixel;
 
+            //The same Parallel.For implementation doesn't play nice here so I'm not gonna touch it for a while
             for (int offsetY = filterOffset; offsetY < imageHeight - filterOffset; offsetY++)
             {
                 for (int offsetX = filterOffset; offsetX < imageWidth - filterOffset; offsetX++)
@@ -147,6 +186,8 @@ namespace Edge_detection
 
     internal static class Matrix
     {
+        //Define the matrixes for the different blur methods
+        //Can add more and/or larger methods for more granular control
         internal static double[,] Mean
         {
             get

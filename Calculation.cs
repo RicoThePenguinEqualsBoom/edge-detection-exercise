@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 
 namespace Edge_detection
 {
+    //Literally just do +, - or average of the currently selected pixels values
     internal class Calculation
     {
         internal static Bitmap ArithmeticBlend(Bitmap image1, Bitmap image2, string operation)
@@ -53,6 +54,7 @@ namespace Edge_detection
             int intResult = operation switch
             {
                 "+" => image1 + image2,
+                "-" => image1 - image2,
                 "- (v1)" => image1 - image2,
                 "- (v2)" => image2 - image1,
                 "avg (best)" => (image1 + image2) / 2,
